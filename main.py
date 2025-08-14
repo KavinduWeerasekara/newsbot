@@ -1,34 +1,52 @@
 # main.py
+
 import os
 import openai
 from dotenv import load_dotenv
+import pydantic # Import pydantic
+import instructor # <-- 1. Import instructor
 
-# Load variables from the .env file into the environment
 load_dotenv()
 
-api_key = os.getenv("OPENAI_API_KEY")
+# Step 1: Define our Pydantic data schema.
+# This is our "form" with the required fields.
+# We are telling Pydantic that 'name' must be a string, 'age' must be an
+# integer, and 'color' must be a string.
 
-if not api_key:
-    raise ValueError("OPENAI_API_KEY is not set")
+class Cat(pydantic.BaseModel):
+    name: str
+    age: int
+    color: str
 
-client = openai.OpenAI(api_key=api_key)
+# Use the instructor client which is patched by Pydantic
+# This adds the 'response_model' parameter to the create call 
 
-print("Sending a prompt to openai API...")
+client = instructor.patch(openai.OpenAI(api_key = os.getenv("OPENAI_API_KEY")))
+
+print("Asking the AI for structured data about a cat...")
 
 try:
-    response = client.chat.completions.create(
+    # Step 2: Use the 'response_model' parameter.
+    # We tell the API call to format its response according to our Cat schema.
+
+    cat_response = client.chat.completions.create(
         model = "gpt-3.5-turbo",
+        response_model = Cat, # This is the magic line
         messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": "Write a single, short sentence about a brave cat who saves the day."}
+            {"role": "user", "content": "Generate data for a cat named Mittens"}
         ]
     )
 
-    ai_response = response.choices[0].message.content
+    # Step 3: Work with the validated data.
+    # The response is now a Pydantic object, not just a dictionary.
+    # We can access the data like attributes.
 
-    print("_________________________________________________")
-    print(f"AI Response: {ai_response}")
-    print("_________________________________________________")
+    print("________________________________________")
+    print("Succussfully received and validated cat data")
+    print(f"Name: {cat_response.name}")
+    print(f"Age: {cat_response.age}")
+    print(f"Color: {cat_response.color}")
+    print("________________________________________")
 
 except Exception as e:
     print(f"An error occurred: {e}")
