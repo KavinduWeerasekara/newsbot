@@ -1,85 +1,45 @@
 # main.py
 
-import os
-import openai
 from dotenv import load_dotenv
-import pydantic # Import pydantic
-import instructor # <-- 1. Import instructor
-import logging # Import the logging library
-from tenacity import retry, stop_after_attempt, wait_fixed # Import tenacity
+from langchain_openai import ChatOpenAI
+from langchain_core_prompts import ChatPromptTemplate
+from langchain_core.output_parser import StrOutParser
 
-# --- Setup ---
-
+# Load environment variables from .env file
 load_dotenv()
 
-# Step 1: Configure the logger
-# This sets up a basic logbook that prints messages to your terminal.
+# 1. Create a Prompt Template
+# This template will take a "topic" variable and insert it into the prompt.
 
-logging.basicConfig(
-    level = logging.INFO, # Set the minimum level of messages to show
-    format = "%(asctime)s - %(levelname)s - %(message)s" # Set the format of the log messages
+prompt = ChatPromptTemplate.from_template(
+    "write a Single, short sentense about {topic}"
 )
 
-# Step 1: Define our Pydantic data schema.
-# This is our "form" with the required fields.
-# We are telling Pydantic that 'name' must be a string, 'age' must be an
-# integer, and 'color' must be a string.
+# 2. Initialize the Model
+# This creates a wrapper around the OpenAI model.
 
-class Cat(pydantic.BaseModel):
-    name: str
-    age: int
-    color: str
+model = ChatOpenAI(model = "gpt-3.5-turbo")
 
-# Use the instructor client which is patched by Pydantic
-# This adds the 'response_model' parameter to the create call 
+# 3. Create an Output Parser
+# This will take the AI's message object and convert it into a simple string.
 
-client = instructor.patch(openai.OpenAI(api_key = os.getenv("OPENAI_API_KEY")))
+output_parser = StrOutputParser()
 
+# 4. Create the Chain using LCEL (the | symbol)
+# This is the core of LangChain. We are "piping" the components together.
+# The output of the prompt flows into the model, and the model's
+# output flows into the parser.
 
-# Step 2: Add the retry "decorator"
-# A decorator (@) is like a hat you put on a function to give it extra powers.
-# This one tells the function to retry 3 times, waiting 2 seconds between attempts if it fails.
+chain = prompt | model | output_parser
 
-@retry(wait=wait_fixed(2), stop=stop_after_attempt(3))
-def create_cat_completion() -> Cat:
+print("invoking the Langchain chain...")
 
-    """Creates a cat completion and handles retries."""
+# 5. Invoke the Chain
+# We run the entire chain by calling .invoke() and passing the
+# input variables as a dictionary.
 
-    logging.info("attempting to call openai API...")
+response = chain.invoke({"topic": "a brave cat who saves the day"})
 
-    cat_response = client.chat.completions.create(
-            model = "gpt-3.5-turbo",
-            response_model = Cat, # This is the magic line
-            messages = [
-                {"role": "user", "content": "Generate data for a cat named Mittens"}
-            ]
-        )
-    logging.info("Successfully received and validated data.")
-
-    return cat_response
-    
-def main():
-    try:
-        # Step 2: Use the 'response_model' parameter.
-        # We tell the API call to format its response according to our Cat schema.
-
-        # Step 3: Call our new, robust function
-        final_cat = create_cat_completion()
-
-        
-        # Step 3: Work with the validated data.
-        # The response is now a Pydantic object, not just a dictionary.
-        # We can access the data like attributes.
-
-        print("________________________________________")
-        print("Succussfully received and validated cat data")
-        print(f"Name: {final_cat.name}")
-        print(f"Age: {final_cat.age}")
-        print(f"Color: {final_cat.color}")
-        print("________________________________________")
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
-
-if __name__ == "__main__":
-    main()
+print("__________________________________________________")
+print(f"AI Response: {response}")
+print("__________________________________________________")
