@@ -1,77 +1,73 @@
 # app/agent.py
-
 from dotenv import load_dotenv
 from typing import TypedDict, Annotated, Sequence
 import operator
-from langchain_core.messages import BaseMessage
+# This is the corrected import line
+from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, SystemMessage
+from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode # <-- 1. Import ToolNode instead of ToolExecutor
+from langgraph.prebuilt import ToolNode
 from langchain_tavily import TavilySearch
 
-
-# Load environment variables
+# Load environment variables FIRST
 load_dotenv()
 
-# 1. Define the Tools
-# We are replacing our fake tool with a real one from Tavily.
-# LangChain automatically creates a description for the AI from the tool itself.
-search_tool = TavilySearch(max_results = 2)
+# Define the Tools
+@tool
+def search(query: str) -> str:
+    """Use this tool to find the most up-to-date information on a person, topic, or event from the internet."""
+    print("\n--- NODE: Calling Tavily Search ---")
+    tavily_tool = TavilySearch(max_results=2)
+    return tavily_tool.invoke(query)
 
-# The tool_executor is a new component that will execute our tools for us
-tool_node = ToolNode([search_tool])
+tools = [search]
+tool_node = ToolNode(tools)
 
-# 2. Define the State
+# Define the State
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
 
-# 3. Define the Nodes
+# Define the Nodes
 def call_model(state: AgentState):
     """Calls the LLM to decide the next action or respond."""
-    print("\n--- NODE: Calling LLM---")
-    messages = state['messages']
-    model = ChatOpenAI(model = "gpt-4o")
+    print("\n--- NODE: Calling LLM ---")
+    
+    # Create the system message to force tool use
+    system_message = SystemMessage(
+        content="You are a research assistant. You must use the 'search' tool for all user questions to find the most up-to-date information. DO NOT answer from your own knowledge."
+    )
+    
+    # Prepend the system message to the conversation history
+    messages = [system_message] + state['messages']
 
-    # We bind the tools to the model every time we call it.
-    model_with_tools = model.bind_tools([search_tool])
-
+    model = ChatOpenAI(model="gpt-4o")
+    model_with_tools = model.bind_tools(tools)
     response = model_with_tools.invoke(messages)
-
     return {"messages": [response]}
 
-# def call_tool(state: AgentState):
-#     """Calls the appropriate tool with the query from the last AI message."""
-#     print("\n--- NODE: Calling Tool ---")
-#     last_message = state ['messages'][-1]
-
-#     # The ToolExecutor will take the tool calls from the AI's message
-#     # and execute them, returning the results.
-#     action = last_message_tool_calls[0]
-#     response = tool_executor.invoke(action)
-
-#     # We return the response as a ToolMessage to satisfy the API
-#     return {"messages": [response]}
-
-# 4. Define the Edges
+# Define the Edges
 def should_continue(state: AgentState):
     """Decides the next step: call a tool or end the conversation."""
     print("\n--- EDGE: Checking for tool calls ---")
-    last_message = state["messages"][-1]
+    last_message = state['messages'][-1]
     if last_message.tool_calls:
         return "tool"
     else:
         return END
 
-# 5. Build the Graph
-workflow = StateGraph(AgentState)
+# Build the Graph
+workflow = StateGraph(AgentState, config={"recursion_limit": 5})
 workflow.add_node("agent", call_model)
 workflow.add_node("tool", tool_node)
 workflow.set_entry_point("agent")
 workflow.add_conditional_edges(
     "agent",
     should_continue,
-    {"tool": "tool", END: END}
+    {
+        "tool": "tool",
+        END: END,
+    }
 )
-
 workflow.add_edge("tool", "agent")
 agent_app = workflow.compile()

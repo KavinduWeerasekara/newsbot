@@ -4,7 +4,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 def run_agent():
     # Ask a question that requires up-to-date information
-    inputs = {"messages": [HumanMessage(content="What is the latest news about Trump")]}
+    inputs = {"messages": [HumanMessage(content="What is the latest news about Artemis")]}
     
     
     for event in agent_app.stream(inputs):
